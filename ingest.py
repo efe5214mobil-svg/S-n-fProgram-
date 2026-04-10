@@ -31,4 +31,4 @@ def create_vector_db(csv_path):
     print(f"✅ Başarılı! {len(df)} kayıt 'vektor_db.index' ve 'metadata.pkl' olarak kaydedildi.")
 
 if __name__ == "__main__":
-    create_vector_db("SinifProgramiYeniDüzenlendi2.csv")
+    create_vector_db("SinifProgramiYeniDüzenlendi.csv")
