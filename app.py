@@ -1,81 +1,72 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import faiss
+import os
+
+# LangChain bileşenlerini güvenli yollardan import ediyoruz
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
-# --- SAYFA YAPILANDIRMASI ---
-st.set_page_config(
-    page_title="AI Okul Asistanı",
-    page_icon="🎓",
-    layout="centered"
-)
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="AI Okul Asistanı", page_icon="🎓")
 
-# --- CSS TASARIM ---
-st.markdown("""
-    <style>
-    .stChatInputContainer { padding-bottom: 20px; }
-    .stChatMessage { border-radius: 15px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- RAG MOTORU (Tek Dosya İçinde) ---
-class OkulAsistani:
-    def __init__(self, groq_api_key):
-        # En uyumlu embedding yolu
+# --- ASİSTAN SINIFI ---
+class OkulAsistaniEngine:
+    def __init__(self, api_key):
+        # Embedding modeli
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
-        # Vektör DB Yükle
-        self.vector_db = FAISS.load_local(
+        # Vektör DB Yükleme (Klasör isminin 'vektor_db.index' olduğundan emin ol)
+        self.db = FAISS.load_local(
             "vektor_db.index", 
             self.embeddings, 
             allow_dangerous_deserialization=True
         )
 
-        # Groq LLM
+        # Groq LLM Yapılandırması
         self.llm = ChatGroq(
-            groq_api_key=groq_api_key,
+            groq_api_key=api_key,
             model_name="llama3-8b-8192",
-            temperature=0.1
+            temperature=0.2
         )
 
-        # Prompt Tasarımı
-        template = """
-        Sen bir okul ders programı asistanısın. Aşağıdaki verileri kullanarak soruyu yanıtla.
-        Verilerde yoksa "Bilmiyorum" de.
+        # Prompt Şablonu
+        template = """Sen bir okul asistanısın. Aşağıdaki ders programı verilerine göre soruyu yanıtla.
+        Verilerde bilgi yoksa "Bilmiyorum" de.
         
         VERİLER: {context}
         SORU: {question}
         CEVAP:"""
         
-        self.QA_PROMPT = PromptTemplate(template=template, input_variables=["context", "question"])
+        self.prompt = PromptTemplate(template=template, input_variables=["context", "question"])
 
-    def cevapla(self, soru):
-        qa_chain = RetrievalQA.from_chain_type(
+    def sor(self, soru):
+        # RAG Zinciri
+        chain = RetrievalQA.from_chain_type(
             llm=self.llm,
             chain_type="stuff",
-            retriever=self.vector_db.as_retriever(search_kwargs={"k": 5}),
-            chain_type_kwargs={"prompt": self.QA_PROMPT}
+            retriever=self.db.as_retriever(search_kwargs={"k": 5}),
+            chain_type_kwargs={"prompt": self.prompt}
         )
-        return qa_chain.invoke(soru)["result"]
+        return chain.invoke(soru)["result"]
 
-# --- APP ARAYÜZÜ ---
+# --- ARAYÜZ ---
 st.title("🎓 Akıllı Ders Programı Asistanı")
 
 @st.cache_resource
-def get_asistan():
+def asistan_yukle():
     if "GROQ_API_KEY" in st.secrets:
-        return OkulAsistani(st.secrets["GROQ_API_KEY"])
+        return OkulAsistaniEngine(st.secrets["GROQ_API_KEY"])
     else:
-        st.error("Secrets içerisinde GROQ_API_KEY bulunamadı!")
+        st.error("GROQ_API_KEY Secrets içinde bulunamadı!")
         return None
 
-asistan = get_asistan()
+asistan = asistan_yukle()
 
+# Sohbet Geçmişi
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -83,14 +74,15 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Sorunuzu yazın..."):
+# Soru Girişi
+if prompt := st.chat_input("Ders programınız hakkında bir soru sorun..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         if asistan:
-            with st.spinner("Düşünüyorum..."):
-                response = asistan.cevapla(prompt)
+            with st.spinner("Program taranıyor..."):
+                response = asistan.sor(prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
