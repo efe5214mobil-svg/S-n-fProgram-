@@ -1,5 +1,12 @@
 import streamlit as st
-from rag_engine import OkulAsistani
+import pandas as pd
+import numpy as np
+import faiss
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_groq import ChatGroq
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 
 # --- SAYFA YAPILANDIRMASI ---
 st.set_page_config(
@@ -8,56 +15,82 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- TASARIM (CSS) ---
+# --- CSS TASARIM ---
 st.markdown("""
     <style>
-    .stChatInputContainer {
-        padding-bottom: 20px;
-    }
-    .stChatMessage {
-        border-radius: 15px;
-    }
+    .stChatInputContainer { padding-bottom: 20px; }
+    .stChatMessage { border-radius: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- RAG MOTORU (Tek Dosya İçinde) ---
+class OkulAsistani:
+    def __init__(self, groq_api_key):
+        # En uyumlu embedding yolu
+        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        
+        # Vektör DB Yükle
+        self.vector_db = FAISS.load_local(
+            "vektor_db.index", 
+            self.embeddings, 
+            allow_dangerous_deserialization=True
+        )
+
+        # Groq LLM
+        self.llm = ChatGroq(
+            groq_api_key=groq_api_key,
+            model_name="llama3-8b-8192",
+            temperature=0.1
+        )
+
+        # Prompt Tasarımı
+        template = """
+        Sen bir okul ders programı asistanısın. Aşağıdaki verileri kullanarak soruyu yanıtla.
+        Verilerde yoksa "Bilmiyorum" de.
+        
+        VERİLER: {context}
+        SORU: {question}
+        CEVAP:"""
+        
+        self.QA_PROMPT = PromptTemplate(template=template, input_variables=["context", "question"])
+
+    def cevapla(self, soru):
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=self.llm,
+            chain_type="stuff",
+            retriever=self.vector_db.as_retriever(search_kwargs={"k": 5}),
+            chain_type_kwargs={"prompt": self.QA_PROMPT}
+        )
+        return qa_chain.invoke(soru)["result"]
+
+# --- APP ARAYÜZÜ ---
 st.title("🎓 Akıllı Ders Programı Asistanı")
 
-# --- MOTORU BAŞLATMA ---
-# API Key doğrudan secrets içinden alınıyor
 @st.cache_resource
 def get_asistan():
-    try:
-        # Secrets içinde 'GROQ_API_KEY' tanımlı olmalı
-        api_key = st.secrets["GROQ_API_KEY"]
-        return OkulAsistani(groq_api_key=api_key, db_path="vektor_db.index")
-    except Exception as e:
-        st.error("Sistem başlatılamadı. Lütfen yöneticiye başvurun veya API anahtarını kontrol edin.")
+    if "GROQ_API_KEY" in st.secrets:
+        return OkulAsistani(st.secrets["GROQ_API_KEY"])
+    else:
+        st.error("Secrets içerisinde GROQ_API_KEY bulunamadı!")
         return None
 
 asistan = get_asistan()
 
-# --- SOHBET SİSTEMİ ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Mesaj geçmişini görüntüle
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Soru alma alanı
-if prompt := st.chat_input("Ders programı hakkında bir soru sorun..."):
-    # Kullanıcı mesajı
+if prompt := st.chat_input("Sorunuzu yazın..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Asistan yanıtı
     with st.chat_message("assistant"):
         if asistan:
-            with st.spinner("Program kontrol ediliyor..."):
+            with st.spinner("Düşünüyorum..."):
                 response = asistan.cevapla(prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
-        else:
-            st.error("Asistan şu an hizmet veremiyor.")
