@@ -1,10 +1,7 @@
 streamlit
-pandas
-faiss-cpu
-sentence-transformers
-langchain
-langchain-community
-langchain-groq
-langchain-huggingface
-langchain-core
 groq
+faiss-cpu
+pandas
+numpy
+sentence-transformers
+scikit-learn
