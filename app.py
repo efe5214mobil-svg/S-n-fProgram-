@@ -160,7 +160,7 @@ st.title("📚 Akıllı Ders Programı Sistemi")
 if not os.path.exists("vector_db.index"):
     st.warning("Vector DB oluşturuluyor...")
     builder = VectorBuilder()
-    builder.build("SinifProgramİYeniDüzenlendi.csv")
+    builder.build("SinifProgramiYeniDüzenlendi.csv")
     st.success("Vector DB hazır!")
 
 # =========================
